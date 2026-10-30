@@ -1,0 +1,26 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { ROLES, MARKET } from '../src/data.js';
+import {newGame,join,start,alive,submitAction,submitKill,submitVote,buy,resolveNight,beginVote,resolveVote,overview,finishText} from '../src/engine.js';
+function make(n=8){const g=newGame('-100999','1','Test');for(let i=1;i<=n;i++)join(g,i,'Тестер '+i);start(g);return g;}
+const find=(g,team)=>alive(g,team)[0];
+test('26 different unique Cyberpunk roles',()=>assert.equal(Object.keys(ROLES).length,26));
+test('6 types of implants',()=>assert.equal(Object.keys(MARKET).length,6));
+test('lobby requires at least 6 players',()=>{const g=newGame('0','1','Test');for(let i=1;i<6;i++)join(g,i,'P'+i);assert.throws(()=>start(g),/6–16/);});
+test('16 players maximum',()=>{const g=newGame('0','1','Test');for(let i=1;i<=16;i++)join(g,i,'P'+i);assert.throws(()=>join(g,17,'P'),/16/);});
+test('roles unique and required roles are included',()=>{const g=make(16),rs=Object.values(g.players).map(p=>p.role);assert.equal(new Set(rs).size,16);for(const role of ['scanner','medic','architect','glitch','phantom'])assert.ok(rs.includes(role));});
+test('faction counts 6, 8, 10, 16',()=>{for(const [n,s,p] of [[6,1,0],[8,2,0],[10,2,1],[16,4,2]]){const g=make(n);assert.equal(alive(g,'syn').length,s);assert.equal(alive(g,'glitch').length,p);}});
+test('start initializes time and roster',()=>{const g=make();assert.equal(g.phase,'night');assert.equal(g.round_no,1);assert.equal(alive(g).length,8);assert.ok(overview(g).includes('8/8'));});
+test('collective attack resolves first night',()=>{const g=make(8),spy=find(g,'syn'),target=find(g,'city');submitKill(g,spy.uid,target.uid);const r=resolveNight(g);assert.ok(r.public.includes('РАНОК'));assert.equal(g.phase,'day');assert.equal(g.players[target.uid].alive,false);});
+test('medic prevents normal killing',()=>{const g=make(8),spy=find(g,'syn'),medic=alive(g).find(p=>p.role==='medic'),target=alive(g,'city').find(p=>p.uid!==medic.uid);submitKill(g,spy.uid,target.uid);submitAction(g,medic.uid,'heal',target.uid);resolveNight(g);assert.equal(g.players[target.uid].alive,true);});
+test('NetWatch sees hidden Arasaka leader as citizen',()=>{const g=make(6),scan=alive(g).find(p=>p.role==='scanner'),boss=alive(g).find(p=>p.role==='architect');submitAction(g,scan.uid,'scan',boss.uid);resolveNight(g);assert.match(g.players[scan.uid].intel.join(' '),/Вільні мешканці/);});
+test('cyberpsycho gains psychosis without frenzy',()=>{const g=make(10),psy=find(g,'glitch');assert.equal(psy.psychosis,1);resolveNight(g);assert.equal(psy.psychosis,2);});
+test('disabled unauthorized action rejected',()=>{const g=make(6),medic=alive(g).find(p=>p.role==='medic');assert.throws(()=>submitAction(g,medic.uid,'scan',find(g,'syn').uid),/не належить/);});
+test('market purchase spends credits and cannot overspend',()=>{const g=make(8),p=find(g,'city');buy(g,p.uid,'smoke');assert.equal(p.credits,0);assert.throws(()=>buy(g,p.uid,'plate'),/Недостатньо/);});
+test('market replacement gives credit back',()=>{const g=make(8),p=find(g,'city');buy(g,p.uid,'smoke');buy(g,p.uid,'tag',find(g,'syn').uid);assert.equal(p.credits,0);assert.equal(g.market_orders[p.uid].item,'tag');});
+test('doctor cannot heal same target twice consecutively',()=>{const g=make(8),m=alive(g).find(p=>p.role==='medic'),p=find(g,'syn');submitAction(g,m.uid,'heal',p.uid);resolveNight(g);beginVote(g);resolveVote(g);if(g.phase==='night'&&m.alive)assert.throws(()=>submitAction(g,m.uid,'heal',p.uid),/дві ночі/);});
+test('public vote requires court',()=>{const g=make(8),p=find(g,'city');assert.throws(()=>submitVote(g,p.uid,'0'),/під час суду/);});
+test('day-to-court and court-to-night transitions',()=>{const g=make(8);resolveNight(g);beginVote(g);assert.equal(g.phase,'vote');const r=resolveVote(g);assert.ok(r.includes('⚖️'));assert.ok(['night','finished'].includes(g.phase));});
+test('tie means no exile',()=>{const g=make(8);resolveNight(g);beginVote(g);const ps=alive(g);submitVote(g,ps[0].uid,ps[2].uid);submitVote(g,ps[1].uid,ps[3].uid);const r=resolveVote(g);assert.match(r,/Нічия/);});
+test('city wins after all corporation agents exiled',()=>{const g=make(6);resolveNight(g);beginVote(g);const boss=find(g,'syn');for(const p of alive(g))submitVote(g,p.uid,boss.uid);resolveVote(g);assert.equal(g.phase,'finished');assert.equal(g.winner,'city');assert.match(finishText(g),/КІНЕЦЬ МАТЧУ/);});
+test('one-use role power is recorded after night',()=>{const g=make(10),p=alive(g).find(p=>p.role==='architect'||p.role==='medic');if(p.role==='architect')return;submitAction(g,p.uid,'heal',find(g,'city').uid);resolveNight(g);assert.equal(p.last_heal.length>0,true);});

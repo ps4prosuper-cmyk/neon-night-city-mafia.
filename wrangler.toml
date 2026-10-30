@@ -1,0 +1,12 @@
+name = "neon-night-city-mafia"
+main = "src/index.js"
+compatibility_date = "2026-10-30"
+workers_dev = true
+
+[triggers]
+crons = ["* * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "neon-night-city"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
